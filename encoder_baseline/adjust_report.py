@@ -27,6 +27,9 @@ def thresh_lin(floor, steps):
 def thresh_find(eval_golds, eval_preds, path_pref, pref, suf, uniform=True, dataset='Nofing/Hievents-span', steps=100, floor=3, tfn=thresh_lin, delta=0.0):
     """
     """
+    if dataset == 'Nofing/MAVEN-ERE-Causal-Events':
+        LABEL_LIST = ['CAUSE', 'PRECONDITION']
+        LABEL_GROUPS = {"CAUSAL": ["CAUSE", "PRECONDITION"]}
     if dataset == 'maven_em':
         LABEL_LIST = ['BEFORE', 'OVERLAP', 'CONTAINS', 'SIMULTANEOUS', 'ENDS-ON', 'BEGINS-ON', 'CAUSE', 'PRECONDITION', 'subevent', 'coreference']
         LABEL_GROUPS = {"TEMPORAL": ["BEFORE", "OVERLAP", "CONTAINS", "SIMULTANEOUS", "BEGINS-ON", "ENDS-ON"], "CAUSAL": ["CAUSE", "PRECONDITION"]}
@@ -46,7 +49,9 @@ def thresh_find(eval_golds, eval_preds, path_pref, pref, suf, uniform=True, data
     # mask = [6, 7]
     # mask = [8]
     # mask = [9]
+    # mask = [0, 1, 2]
     mask = [0, 1]
+    # mask = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
     print(pref+'classification_report'+suf)
     a = torch.stack([ep for eps in eval_preds for ep in eps])
@@ -172,5 +177,14 @@ if __name__ == "__main__":
     parser.add_argument('integers', metavar='N', type=int, nargs='+', help='an integer for the list')  
     args = parser.parse_args()  
     # 'Nofing/MECI-v0.1-public-span' 'Nofing/Hievents-span'
-    main(args.integers, uniform=True, path='./encoder_baseline/logs/MatrixIEO/', dataset='Nofing/MECI-v0.1-public-span')
+    dataset_list = [
+        'Nofing/MAVEN-ERE-Causal-Events', 
+        'maven_em', 
+        'maven', 
+        'matres', 
+        'Nofing/Hievents-span', 
+        'Nofing/MECI-v0.1-public-span'
+    ]
+    dataset = 'Nofing/MECI-v0.1-public-span'
+    main(args.integers, uniform=True, path='./encoder_baseline/logs/MatrixIEO/', dataset=dataset)
     #main(args.integers, path='./logs/')

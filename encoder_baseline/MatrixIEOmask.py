@@ -44,9 +44,15 @@ class Config:
     FRAME_SCOPE_LIST = ['events', 'frames']
     BATCH_SHUFFLE = True    # Shuffling to form batches
     ### Data Prep
-    DATASET = 'Nofing/MECI-v0.1-public-span'
-                            # Dataset used
-    DATASET_LIST = ['Nofing/Maven-ERE-span', 'Nofing/MECI-v0.1-public-span', 'Nofing/Hievents-span', 'Nofing/EventStoryLine-1.5-span']
+    # Dataset used
+    DATASET = 'Nofing/MAVEN-ERE-Causal-Events'
+    DATASET_LIST = [
+        'Nofing/Maven-ERE-span', 
+        'Nofing/MECI-v0.1-public-span', 
+        'Nofing/Hievents-span', 
+        'Nofing/EventStoryLine-1.5-span',
+        'Nofing/MAVEN-ERE-Causal-Events',
+    ]
                             # Possible datasets
     NO_IDENTICAL = True     # The relations cannot be from a cluster to itself
     UNDER_SAMPLE = False    # Undersampling the train dataset
@@ -74,7 +80,7 @@ class Config:
     VALID_AGGREG = ['mean', 'max', 'lse']
 
     # Dataset segment
-    DATASET_TRAIN = 'train'
+    DATASET_TRAIN = 'dev'
     DATASET_TEST = 'dev'
     DATASET_SET_LIST = ['train', 'dev', 'test']
     DATASET_LOAD = False
@@ -1812,14 +1818,18 @@ def __main__():
     dataset = data_preped(hf_path=config.DATASET)
     loggit(config, "Dataset Interface Load Done")
     config.LABEL_LIST = dataset.ere_types
+    print("\n", "aya", "config.LABEL_LIST:", config.LABEL_LIST, "\n")
     config.NUM_LABELS = len(config.LABEL_LIST)
+    print("\n", "aya", "config.REL_TYPE_MASK, config.REL_TYPE_IDX:", config.REL_TYPE_MASK, config.REL_TYPE_IDX, "\n")
     if len(config.REL_TYPE_MASK)+len(config.REL_TYPE_IDX)==0:
+        print("\n", "aya", "If neither rel type mask nor rel type idx list filled", "\n")
         config.REL_TYPE_MASK = [1.0]*config.NUM_LABELS
         config.REL_TYPE_IDX = list(range(config.NUM_LABELS))
         if 'NoRel' in config.LABEL_LIST:
             norel_idx = config.LABEL_LIST.index('NoRel')
             config.REL_TYPE_MASK[norel_idx] = 0.0
             config.REL_TYPE_IDX.pop(norel_idx)
+            print("\n", "aya", "again: norel_idx, config.REL_TYPE_MASK, config.REL_TYPE_IDX", norel_idx, config.REL_TYPE_MASK, config.REL_TYPE_IDX)
     
     if not config.DATASET_LOAD:
         dataset.set_dataset(config.DATASET_TRAIN)
