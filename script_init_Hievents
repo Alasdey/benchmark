@@ -1,3 +1,5 @@
+export HF_HOME="/home/jovyan/buckets"
+
 read -s -r -p "Enter your Hugging Face token: " HF_TOKEN
 export HF_TOKEN
 
