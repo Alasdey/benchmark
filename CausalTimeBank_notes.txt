@@ -1,0 +1,219 @@
+CAUSAL-TIMEBANK — DATASET NOTES
+=================================
+Generated: 2026-05-13
+Source: paramitamirza/Causal-TimeBank (GitHub)
+Format used: Causal-TimeBank-TimeML.zip (183 .tml files)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. WHAT IT IS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Causal-TimeBank extends the TempEval-3 / TimeBank English corpus
+(183 news documents, ~1998 newswire) by adding two causal annotation
+layers on top of the existing TimeML temporal annotations:
+
+  C-SIGNAL   causal signal words inline in text
+             ("because", "due to", "in exchange", "by", …)
+
+  CLINK      directed causal link between two event instances
+             eventInstanceID → relatedToEventInstance
+             optionally carrying a c-signalID pointer
+
+The rest of the TimeML structure is inherited unchanged:
+  EVENT / MAKEINSTANCE  surface event mentions + instances
+  TLINK                 temporal links (BEFORE, AFTER, SIMULTANEOUS, …)
+  TIMEX3                time expressions
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. CORPUS STATISTICS (measured directly from the files)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Total documents:              183
+  Total MAKEINSTANCE (events):  6,810
+  Total TLINKs:                 5,118
+  Total CLINKs:                 318
+
+  Documents with ≥1 CLINK:      109 / 183  (60%)
+  Documents with 0 CLINKs:       74 / 183  (40%)
+
+  Mean CLINKs per document:       1.74
+  Max CLINKs in one document:    15
+
+  CLINK : TLINK ratio:           1 : 16.1
+  CLINK : EVENT ratio:           1 : 21.4   ← class imbalance ratio
+
+  CLINKs with explicit C-SIGNAL: 169 / 318  (53%)
+  CLINKs without C-SIGNAL:       149 / 318  (47%)
+
+  CLINK locality:
+    Same sentence:               286 / 318  (90%)
+    Cross-sentence:               32 / 318  (10%)
+
+  CLINKs that also have a TLINK:  103 / 318  (32%)
+  CLINKs with NO corresponding TLINK: 215 / 318  (68%)
+
+  Transitivity chains (A→B + B→C):  6 opportunities
+    Of which A→C is also annotated:  0  (none — never propagated)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. WHICH PAIRS WERE ANNOTATED — ANNOTATION SCOPE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The annotation was NOT exhaustive over all event pairs.
+It was trigger-first and primarily sentence-local:
+
+  Step 1 — Scan for C-SIGNALs.
+    Annotators identified causal signal words in the text. Each
+    C-SIGNAL triggered a CLINK annotation between the cause event
+    and the effect event flanking it. This accounts for 53% of CLINKs.
+
+  Step 2 — Annotator judgment for signal-free cases.
+    The remaining 47% of CLINKs were added when causality was judged
+    clear and direct even without a lexical marker.
+
+  Scope constraint: 90% of CLINKs are within the same sentence.
+    Cross-sentence causal relations were rarely annotated, even when
+    present. This is a hard practical boundary on recall.
+
+  No closed-world assumption is stated.
+    Unannotated event pairs are not guaranteed to be non-causal —
+    they were simply not inspected or not agreed upon. This means
+    treating all non-CLINK pairs as negative examples (standard
+    practice in the literature) is an approximation, not ground truth.
+
+  No coreference layer.
+    The underlying TimeBank corpus has no event coreference
+    annotations. Causal-TimeBank inherits this absence — causal
+    relations are never propagated through coreference chains.
+
+  No transitivity closure.
+    The 6 transitivity chains (A→B, B→C) were never closed to A→C.
+
+  Inter-annotator agreement: κ ≈ 0.63 (reported in Mirza et al. 2014)
+    Moderate agreement — signal-free CLINKs are inherently subjective.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. HOW SOTA LITERATURE HANDLES THE SPARSITY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Short answer: most papers acknowledge the sparsity, very few fix it
+structurally. Nobody has re-annotated the corpus.
+
+── 4a. Joint TLINK + CLINK modeling  [most common, ~3 papers] ──
+
+  Mirza & Tonelli — CATENA (COLING 2016)
+    Sieve-based system. TLINK classifier runs first; its output
+    constraints inform the CLINK classifier. Also applies transitivity
+    closure over CLINKs (adds ≤6 pairs in practice). Considered the
+    baseline system for the corpus.
+
+  Ning, Feng, Wu, Roth — ACL 2018
+    Constrained conditional model (ILP) that jointly infers TLINKs
+    and CLINKs. Temporal constraints (BEFORE/AFTER) prune impossible
+    CLINK candidates, reducing false positives without touching the
+    annotations.
+
+  Gao et al. — NAACL 2019
+    Document-level ILP with coreference propagation (requires running
+    an external coref system). Joint temporal+causal+coref inference.
+    Most principled structural approach in the literature.
+
+── 4b. Data augmentation / distant supervision  [~3 papers] ──
+
+  Zuo et al. — KnowDis (COLING 2020)
+    Distant supervision using external causal knowledge bases to
+    generate additional training pairs. +gain on F1 vs no augmentation.
+
+  Zuo et al. — LearnDA (ACL 2021)
+    Dual-learning loop that iteratively generates synthetic causal
+    examples. +2.1 F1 on Causal-TimeBank vs prior SOTA.
+
+  Zuo et al. — CauSeRL (ACL Findings 2021)
+    Self-supervised pretraining on out-of-domain causal text before
+    fine-tuning on Causal-TimeBank. +3.4 F1.
+    None of these touch the annotation — they compensate externally.
+
+── 4c. Cross-corpus transfer  [post-2022 trend] ──
+
+  Zuo et al. — arXiv 2025
+    Evaluates transfer across 6 causal datasets including
+    Causal-TimeBank. Key finding: annotation diversity beats volume —
+    mixing corpora (EventStoryLine, MAVEN-ERE, etc.) outperforms
+    training on any one corpus alone.
+    Introduces F1_phrase metric to handle annotation inconsistencies.
+
+── 4d. LLM-era approaches  [current] ──
+
+  Liang et al. — EMNLP 2024
+    In-context contrastive learning: carefully selected positive and
+    negative demonstration pairs. Implicitly handles imbalance through
+    demonstration curation. No explicit discussion of sparsity.
+
+── What nobody does ──
+
+  • Re-annotate or extend the corpus (accepted as-is by the community)
+  • Use macro-F1, PR curves, or balanced accuracy despite 21:1 imbalance
+    — everyone reports standard F1 on the CLINK class only
+  • Explicit negative sampling during training (surprisingly rare)
+  • Transitivity closure beyond CATENA and Gao 2019
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. PRACTICAL IMPLICATIONS FOR THIS PROJECT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  • The 318 CLINKs are a lower bound on true causal relations.
+    Precision is probably high; recall is unknown and likely low.
+
+  • Treating all non-CLINK pairs as negatives is standard but wrong.
+    Models trained this way learn "no explicit signal nearby = no
+    causality", which is a proxy for the true label.
+
+  • Including TLINKs in the dataset (as CausalTimeBank_dataprep.py
+    does) enables downstream joint reasoning — the highest-leverage
+    validated technique in the literature.
+
+  • Transitivity closure adds only 6 pairs — negligible.
+
+  • Coreference propagation would require an external coref pass over
+    the TempEval-3 text. Potentially useful but no standard version
+    of this exists for the corpus.
+
+  • For benchmarking: report F1 on CLINK class only, as all papers do,
+    to stay comparable. Be aware this hides recall problems.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. KEY REFERENCES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Mirza et al. (2014)        https://aclanthology.org/C14-1198
+    Original Causal-TimeBank annotation paper (COLING 2014)
+
+  Mirza & Tonelli (2016)     https://aclanthology.org/C16-1007
+    CATENA system (COLING 2016)
+
+  Ning et al. (2018)         https://aclanthology.org/P18-1212
+    Joint temporal+causal reasoning (ACL 2018)
+
+  Gao et al. (2019)          https://aclanthology.org/N19-1179
+    Document-level causal structures with coref (NAACL 2019)
+
+  Zuo et al. (2020)          https://aclanthology.org/2020.coling-main.135
+    KnowDis distant supervision (COLING 2020)
+
+  Zuo et al. (2021a)         https://aclanthology.org/2021.acl-long.276
+    LearnDA augmentation (ACL 2021)
+
+  Zuo et al. (2021b)         https://aclanthology.org/2021.findings-acl.190
+    CauSeRL cross-corpus pretraining (ACL Findings 2021)
+
+  Liang et al. (2024)        https://aclanthology.org/2024.emnlp-main.51
+    In-context contrastive learning (EMNLP 2024)
+
+  Survey (2024)              https://arxiv.org/abs/2411.10371
+    Survey of Event Causality Identification
