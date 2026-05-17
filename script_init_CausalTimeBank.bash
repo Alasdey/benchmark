@@ -6,8 +6,6 @@ unzip data/CausalTimeBank/Causal-TimeBank-TimeML.zip -d data/CausalTimeBank/Time
 read -s -r -p "Enter your Hugging Face token: " HF_TOKEN
 export HF_TOKEN
 
-python3 CausalTimeBank_dataprep.py \
+uv run python3 CausalTimeBank_dataprep_aligned.py \
   --root_dir data/CausalTimeBank/TimeML \
-  --seed 42 \
-  --test_size 0.1 \
-  --repo_id Nofing/CausalTimeBank-span
+  --repo_id Nofing/CausalTimeBank-aligned

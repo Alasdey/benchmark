@@ -186,6 +186,19 @@ structurally. Nobody has re-annotated the corpus.
   • For benchmarking: report F1 on CLINK class only, as all papers do,
     to stay comparable. Be aware this hides recall problems.
 
+  • C-SIGNAL annotations are NOT yet stored in CausalTimeBank_dataprep_aligned.py.
+    The signal tokens are present in the token stream (a neural model sees them),
+    but two things are lost:
+      (a) the span of each C-SIGNAL element (cid + token indices)
+      (b) the CLINK → c-signalID pointer (which CLINK is triggered by which signal)
+    To add: store a `csignals` field (list of [cid, span]) and annotate each
+    CLINK entry with its c-signalID or None.
+    Why it matters:
+      - Feature-based baselines (CATENA) use C-SIGNAL presence as a direct feature.
+      - Enables stratified evaluation: C-SIGNAL-triggered (53%, easier) vs.
+        implicit CLINKs (47%, harder) — the most diagnostic breakdown in the
+        corpus, but one no published paper reports.
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 6. KEY REFERENCES
