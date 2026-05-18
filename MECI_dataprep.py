@@ -84,12 +84,21 @@ def _parse_ann_file(path: str) -> Dict:
         tgt_idx = mentions.index(tgt)
         relations[rel_type].append([src_idx, tgt_idx])
 
+    seen_pairs: set = set()
+    pair_list: List[List[int]] = []
+    for pairs in relations.values():
+        for src_idx, tgt_idx in pairs:
+            if (src_idx, tgt_idx) not in seen_pairs:
+                seen_pairs.add((src_idx, tgt_idx))
+                pair_list.append([src_idx, tgt_idx])
+
     return {
         "id":        os.path.splitext(os.path.basename(path))[0],
         "tokens":    tokens,
         "mentions":  mentions,
         "spans":     spans,
         "relations": dict(relations),
+        "pair_list": pair_list,
     }
 
 # ──────────────────────────────────────────────────────────────────────────────
