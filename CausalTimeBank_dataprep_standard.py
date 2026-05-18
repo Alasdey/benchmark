@@ -22,7 +22,8 @@ Output schema per row (identical fields to _aligned, narrower relations):
   mentions   list[str]          eiids present in TEXT, position-ordered
   spans      list[list[int]]    token index lists per mention (0-based, doc-level)
   relations  dict               {"CauseEffect": [[src_idx, tgt_idx], ...],
-                                 "EffectCause": [[tgt_idx, src_idx], ...]}
+                                 "EffectCause": [[tgt_idx, src_idx], ...],
+                                 "NoRel":       [[i, j], ...]}  ← all unlabeled pairs
   sentences  list[[int, int]]   sentence token boundary pairs [start, end)
   pair_list  list[[int, int]]   directed intra-sentence pairs (mention indices)
 
@@ -45,7 +46,7 @@ import xml.etree.ElementTree as ET
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
-from datasets import Dataset
+from datasets import Dataset, Features, Sequence, Value
 
 
 # ─────────────────── sentence-aware TEXT element parsing ─────────────────────
@@ -176,6 +177,10 @@ def _parse_tml(path: str, doc_idx: int) -> Dict | None:
                 if i != j:
                     pair_list.append([i, j])
 
+    labeled = {(p[0], p[1]) for p in cause_effect + effect_cause}
+    no_rel = [[i, j] for i, j in pair_list if (i, j) not in labeled]
+    relations["NoRel"] = no_rel
+
     return {
         "id": doc_id,
         "doc_idx": doc_idx,
@@ -201,12 +206,28 @@ def build_dataset(root_dir: str) -> Dataset:
 
     n_clinks = sum(len(r["relations"]["CauseEffect"]) for r in rows)
     n_pairs = sum(len(r["pair_list"]) for r in rows)
+    n_norel = sum(len(r["relations"]["NoRel"]) for r in rows)
     print(f"Total intra-sentence pairs : {n_pairs}")
     print(f"Intra-sentence CLINKs      : {n_clinks}  (cross-sentence dropped)")
     print(f"Labeled directional pairs  : {n_clinks * 2}  (CauseEffect + EffectCause)")
-    print(f"Imbalance ratio            : 1 : {(n_pairs - n_clinks * 2) // max(n_clinks * 2, 1)}")
+    print(f"NoRel pairs                : {n_norel}")
+    print(f"Imbalance ratio            : 1 : {n_norel // max(n_clinks * 2, 1)}")
 
-    return Dataset.from_list(rows)
+    features = Features({
+        "id": Value("string"),
+        "doc_idx": Value("int64"),
+        "tokens": Sequence(Value("string")),
+        "mentions": Sequence(Value("string")),
+        "spans": Sequence(Sequence(Value("int64"))),
+        "relations": {
+            "CauseEffect": Sequence(Sequence(Value("int64"))),
+            "EffectCause": Sequence(Sequence(Value("int64"))),
+            "NoRel": Sequence(Sequence(Value("int64"))),
+        },
+        "sentences": Sequence(Sequence(Value("int64"))),
+        "pair_list": Sequence(Sequence(Value("int64"))),
+    })
+    return Dataset.from_list(rows, features=features)
 
 
 # ──────────────────────────────── HF push ────────────────────────────────────
