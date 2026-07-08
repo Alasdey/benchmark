@@ -8,13 +8,29 @@ Decisions
 ---------
 version       v0.9  — the only version benchmarked by published ECI papers.
 mentions      ACTION_* tags only (event triggers).
-relations     PLOT_LINK relType ∈ {PRECONDITION, FALLING_ACTION}
-              → causes [src, tgt] / caused_by [tgt, src].
-              All annotated pairs kept regardless of sentence distance.
+relations     Loaded from evaluation_format/full_corpus/v0.9/coref_chain/
+              (pre-computed by create_gold_document.py: each line is
+              "src_members\ttgt_members\trelType" where *_members are
+              space-separated coreferent mention groups). We cross-expand
+              src_members × tgt_members but DROP any pair whose two mentions
+              are coreferent with each other (same group, via union-find over
+              all groups in the doc) — those are the same event mentioned
+              twice, not a causal pair. The gold ESC annotations sometimes
+              draw a PLOT_LINK between two coreferent mentions themselves,
+              which upstream cartesian-expansion (event_mentions_extended)
+              turns into spurious intra-cluster "causal" pairs; reading
+              coref_chain instead preserves the grouping needed to exclude
+              them (~16% of naively-expanded pairs are dropped this way).
+              relType ∈ {PRECONDITION, FALLING_ACTION} → causes [src, tgt] /
+              causedby [tgt, src].
+              5 docs have no tab file and fall back to raw XML PLOT_LINKs.
 dev topics    {37, 41} — Caselli & Vossen (2017), confirmed in HOTECI source.
               split="dev", excluded from 5-fold CV.
 fold          doc_idx % 5  (train docs only).
-coref         No propagation — ESL v0.9 has directed coreference cycles.
+doc_idx       contiguous — assigned only to rows that parse successfully.
+coref         Propagated via evaluation format (standard across all SOTA papers).
+NOTE          pair_list not stored — consumers enumerate ordered mention pairs at
+              training time using sentences + spans.
 
 Output schema (one row per document)
 -------------------------------------
@@ -26,7 +42,7 @@ Output schema (one row per document)
   mentions    list[str]    m_id strings, sorted by first token position
   spans       list[list[int]]  token indices per mention (0-based, doc-level)
   relations   dict         {"causes":    [[src_idx, tgt_idx], …],
-                             "caused_by": [[tgt_idx, src_idx], …]}
+                             "causedby": [[tgt_idx, src_idx], …]}
   sentences   list[list[int]]  [[start, end), …] token boundary slices
 
 Fold usage
@@ -50,7 +66,7 @@ import xml.etree.ElementTree as ET
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
-from datasets import Dataset, Features, Sequence, Value
+from datasets import Dataset, DatasetDict, Features, Sequence, Value
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -67,9 +83,58 @@ ACTION_TAGS: set[str] = {
 
 CAUSAL_RELTYPES: set[str] = {"PRECONDITION", "FALLING_ACTION"}
 
+# ── coref_chain tab parser ───────────────────────────────────────────────────
+
+def _load_causal_pairs(tab_path: str) -> List[Tuple[str, str, str]]:
+    """Parse a coref_chain .tab file into member-level (src, tgt, relType)
+    triples, excluding pairs whose two members are coreferent with each
+    other (same space-separated group, anywhere in the doc)."""
+    parent: Dict[str, str] = {}
+
+    def find(x: str) -> str:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    lines: List[Tuple[List[str], List[str], str]] = []
+    with open(tab_path) as fh:
+        for line in fh:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) != 3:
+                continue
+            src_str, tgt_str, rel_type = parts
+            if rel_type not in CAUSAL_RELTYPES:
+                continue
+            src_members = src_str.split(" ")
+            tgt_members = tgt_str.split(" ")
+            lines.append((src_members, tgt_members, rel_type))
+            for members in (src_members, tgt_members):
+                for a, b in zip(members, members[1:]):
+                    union(a, b)
+
+    pairs: List[Tuple[str, str, str]] = []
+    seen: set = set()
+    for src_members, tgt_members, rel_type in lines:
+        for x in src_members:
+            for y in tgt_members:
+                if find(x) == find(y):
+                    continue  # coreferent, not causal
+                key = (x, y, rel_type)
+                if key in seen:
+                    continue
+                seen.add(key)
+                pairs.append(key)
+    return pairs
+
 # ── XML parser ────────────────────────────────────────────────────────────────
 
-def _parse_xml(path: str, doc_idx: int, topic_id: int) -> Optional[Dict]:
+def _parse_xml(path: str, doc_idx: int, topic_id: int, eval_dir: str) -> Optional[Dict]:
     try:
         root = ET.parse(path).getroot()
     except ET.ParseError as exc:
@@ -102,46 +167,66 @@ def _parse_xml(path: str, doc_idx: int, topic_id: int) -> Optional[Dict]:
     ]
 
     # 3. ACTION mentions, sorted by first token position
-    raw: List[Tuple[int, str, List[int]]] = []
+    #    Also collect frozenset of t_id strings per mention for tab-file lookup.
+    raw: List[Tuple[int, str, List[int], frozenset]] = []
     for m in root.findall(".//Markables/*"):
         if m.tag not in ACTION_TAGS:
             continue
         m_id = m.get("m_id")
         if not m_id:
             continue
-        anchors = sorted(
-            tid_to_pos[int(a.get("t_id"))]
+        anchor_pairs = [
+            (a.get("t_id"), tid_to_pos[int(a.get("t_id"))])
             for a in m.findall("token_anchor")
-            if int(a.get("t_id", 0)) in tid_to_pos
-        )
-        if anchors:
-            raw.append((anchors[0], m_id, anchors))
+            if a.get("t_id") and int(a.get("t_id", 0)) in tid_to_pos
+        ]
+        if anchor_pairs:
+            raw.append((
+                min(p[1] for p in anchor_pairs),
+                m_id,
+                sorted(p[1] for p in anchor_pairs),
+                frozenset(p[0] for p in anchor_pairs),
+            ))
 
     raw.sort(key=lambda x: x[0])
     mentions: List[str]        = [r[1] for r in raw]
     spans:    List[List[int]]  = [r[2] for r in raw]
     mid_to_idx: Dict[str, int] = {m: i for i, m in enumerate(mentions)}
+    tid_set_to_midx: Dict[frozenset, int] = {r[3]: i for i, r in enumerate(raw)}
 
     if len(mentions) < 2:
         return None
 
-    # 4. Causal relations — all PLOT_LINKs, no sentence filter
+    # 4. Causal relations — from propagated evaluation format tab file.
+    #    Falls back to raw XML PLOT_LINKs for the 5 docs without a tab file.
     causes:     List[List[int]] = []
-    caused_by:  List[List[int]] = []
+    causedby:  List[List[int]] = []
 
-    for rel in root.findall(".//Relations/PLOT_LINK"):
-        if rel.get("relType", "") not in CAUSAL_RELTYPES:
-            continue
-        src_el = rel.find("source")
-        tgt_el = rel.find("target")
-        if src_el is None or tgt_el is None:
-            continue
-        src_idx = mid_to_idx.get(src_el.get("m_id", ""))
-        tgt_idx = mid_to_idx.get(tgt_el.get("m_id", ""))
-        if src_idx is None or tgt_idx is None:
-            continue
-        causes.append([src_idx, tgt_idx])
-        caused_by.append([tgt_idx, src_idx])
+    doc_stem = os.path.splitext(os.path.splitext(os.path.basename(path))[0])[0]
+    tab_path = os.path.join(eval_dir, str(topic_id), doc_stem + ".tab")
+
+    if os.path.exists(tab_path):
+        for src_str, tgt_str, rel_type in _load_causal_pairs(tab_path):
+            src_idx = tid_set_to_midx.get(frozenset(src_str.split("_")))
+            tgt_idx = tid_set_to_midx.get(frozenset(tgt_str.split("_")))
+            if src_idx is None or tgt_idx is None:
+                continue
+            causes.append([src_idx, tgt_idx])
+            causedby.append([tgt_idx, src_idx])
+    else:
+        for rel in root.findall(".//Relations/PLOT_LINK"):
+            if rel.get("relType", "") not in CAUSAL_RELTYPES:
+                continue
+            src_el = rel.find("source")
+            tgt_el = rel.find("target")
+            if src_el is None or tgt_el is None:
+                continue
+            src_idx = mid_to_idx.get(src_el.get("m_id", ""))
+            tgt_idx = mid_to_idx.get(tgt_el.get("m_id", ""))
+            if src_idx is None or tgt_idx is None:
+                continue
+            causes.append([src_idx, tgt_idx])
+            causedby.append([tgt_idx, src_idx])
 
     return {
         "id":       doc_id,
@@ -153,14 +238,14 @@ def _parse_xml(path: str, doc_idx: int, topic_id: int) -> Optional[Dict]:
         "spans":    spans,
         "relations": {
             "causes":    causes,
-            "caused_by": caused_by,
+            "causedby": causedby,
         },
         "sentences": sentences,
     }
 
 # ── dataset builder ───────────────────────────────────────────────────────────
 
-def build_dataset(root_dir: str) -> Dataset:
+def build_dataset(root_dir: str, eval_dir: Optional[str] = None) -> DatasetDict:
     xml_files = glob.glob(os.path.join(root_dir, "**", "*.xml"), recursive=True)
     if not xml_files:
         raise FileNotFoundError(f"No .xml files found under {root_dir}")
@@ -171,12 +256,20 @@ def build_dataset(root_dir: str) -> Dataset:
 
     xml_files = sorted(xml_files, key=_key)
 
+    if eval_dir is None:
+        esl_root = os.path.dirname(os.path.dirname(root_dir))
+        eval_dir = os.path.join(
+            esl_root, "evaluation_format", "full_corpus", "v0.9", "coref_chain"
+        )
+
     rows: List[Dict] = []
-    for doc_idx, path in enumerate(xml_files):
+    doc_idx = 0
+    for path in xml_files:
         t = os.path.basename(os.path.dirname(path))
-        row = _parse_xml(path, doc_idx, int(t) if t.isdigit() else 0)
+        row = _parse_xml(path, doc_idx, int(t) if t.isdigit() else 0, eval_dir)
         if row is not None:
             rows.append(row)
+            doc_idx += 1
 
     n_train = sum(1 for r in rows if r["split"] == "train")
     n_dev   = sum(1 for r in rows if r["split"] == "dev")
@@ -195,15 +288,19 @@ def build_dataset(root_dir: str) -> Dataset:
         "spans":    Sequence(Sequence(Value("int64"))),
         "relations": {
             "causes":    Sequence(Sequence(Value("int64"))),
-            "caused_by": Sequence(Sequence(Value("int64"))),
+            "causedby": Sequence(Sequence(Value("int64"))),
         },
         "sentences": Sequence(Sequence(Value("int64"))),
     })
-    return Dataset.from_list(rows, features=features)
+    full = Dataset.from_list(rows, features=features)
+    return DatasetDict({
+        "train": full.filter(lambda x: x["split"] == "train"),
+        "dev":   full.filter(lambda x: x["split"] == "dev"),
+    })
 
 # ── HF push ───────────────────────────────────────────────────────────────────
 
-def push_to_hub(dataset: Dataset, repo_id: str, token: Optional[str], private: bool) -> None:
+def push_to_hub(dataset: DatasetDict, repo_id: str, token: Optional[str], private: bool) -> None:
     dataset.push_to_hub(
         repo_id,
         token=token or os.getenv("HF_TOKEN"),
@@ -224,15 +321,21 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--repo_id",
-        default="Nofing/EventStoryLine-master",
+        default="Nofing/EventStoryLine-0.9-standard-eci",
         help="HuggingFace dataset repo to push to.",
     )
     p.add_argument("--private", action="store_true")
     p.add_argument("--token", default=None, help="HF token (falls back to $HF_TOKEN).")
+    p.add_argument(
+        "--eval_dir",
+        default=None,
+        help="Path to evaluation_format/.../coref_chain/ "
+             "(auto-derived from root_dir if omitted).",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    ds = build_dataset(root_dir=args.root_dir)
+    ds = build_dataset(root_dir=args.root_dir, eval_dir=args.eval_dir)
     push_to_hub(ds, repo_id=args.repo_id, token=args.token, private=args.private)
