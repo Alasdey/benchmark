@@ -321,7 +321,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--repo_id",
-        default="Nofing/EventStoryLine-0.9-standard-eci",
+        default="Nofing/EventStoryLine-0.9-standard-eci-corefixed",
         help="HuggingFace dataset repo to push to.",
     )
     p.add_argument("--private", action="store_true")
